@@ -1,0 +1,19 @@
+# Port the HTTP server listens on (Render/Railway inject their own $PORT)
+PORT=8080
+
+# HMAC secret. MUST match WORKER_SHARED_SECRET in the Lovable app.
+WORKER_SHARED_SECRET=change-me-to-a-long-random-string
+
+# OpenAI API key for Whisper transcription (whisper-1). Optional; if unset,
+# clips are still produced but without transcript-driven titles.
+OPENAI_API_KEY=
+
+# Optional Redis URL for BullMQ. If unset, an in-memory queue is used
+# (fine for a single instance; use Redis when you scale horizontally).
+REDIS_URL=
+
+# Max concurrent jobs per worker process
+WORKER_CONCURRENCY=1
+
+# How many clips to cut per source video
+CLIPS_PER_VIDEO=3
