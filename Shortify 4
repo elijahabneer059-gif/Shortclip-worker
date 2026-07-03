@@ -1,0 +1,19 @@
+# Render blueprint. Push this repo folder, then in Render click
+# "New +" → "Blueprint" and point it at your fork.
+services:
+  - type: web
+    name: shortclip-worker
+    env: docker
+    plan: standard   # ffmpeg needs real CPU/RAM; free tier is too small
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: WORKER_SHARED_SECRET
+        sync: false            # set to the SAME value as in Lovable
+      - key: OPENAI_API_KEY
+        sync: false            # optional but recommended
+      - key: CLIPS_PER_VIDEO
+        value: "3"
+      - key: WORKER_CONCURRENCY
+        value: "1"
