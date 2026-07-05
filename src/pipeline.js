@@ -34,6 +34,7 @@ async function ffprobeDuration(file) {
   return parseFloat(stdout.trim());
 }
 
+// Pick evenly-spaced clip windows from [10%, 90%] of the source.
 function pickWindows(duration, clipSeconds, count) {
   const usable = Math.max(0, duration - 20);
   if (usable < clipSeconds) return [{ start: 0, end: Math.min(duration, clipSeconds) }];
@@ -58,7 +59,7 @@ async function transcribe(audioPath) {
       response_format: "verbose_json",
       timestamp_granularities: ["segment"],
     });
-    return res;
+    return res; // { text, segments: [{start,end,text}], ... }
   } catch (err) {
     console.warn("Whisper failed:", err?.message);
     return null;
@@ -103,12 +104,30 @@ export async function processJob(data, onProgress) {
   try {
     await report("downloading", 5);
     const sourceFile = path.join(workDir, "source.mp4");
-    await run("yt-dlp", [
+    // Merge best video+audio, fall back to a progressive mp4.
+    const ytdlpArgs = [
       "-f", "bv*+ba/b",
       "--merge-output-format", "mp4",
+      "--no-warnings",
+      // Impersonate a real browser client; helps with the "sign in to
+      // confirm you're not a bot" check on many videos.
+      "--extractor-args", "youtube:player_client=web,web_safari,android",
       "-o", sourceFile,
-      source_url,
-    ], {
+    ];
+    // If cookies were provided via YOUTUBE_COOKIES (materialized to a file by
+    // entrypoint.sh) or YOUTUBE_COOKIES_PATH points at an existing file,
+    // pass them to yt-dlp so it can authenticate as a signed-in user.
+    const cookiesPath = process.env.YOUTUBE_COOKIES_PATH;
+    if (cookiesPath) {
+      try {
+        await stat(cookiesPath);
+        ytdlpArgs.push("--cookies", cookiesPath);
+      } catch {
+        console.warn(`YOUTUBE_COOKIES_PATH set but ${cookiesPath} not found`);
+      }
+    }
+    ytdlpArgs.push(source_url);
+    await run("yt-dlp", ytdlpArgs, {
       onStderr: (s) => {
         const m = s.match(/(\d+(?:\.\d+)?)%/);
         if (m) {
@@ -124,6 +143,7 @@ export async function processJob(data, onProgress) {
       throw new Error(`Source video too short (${duration}s) for ${clipSeconds}s clips`);
     }
 
+    // Extract 16kHz mono wav for whisper.
     const audioFile = path.join(workDir, "audio.wav");
     await run("ffmpeg", ["-y", "-i", sourceFile, "-vn", "-ac", "1", "-ar", "16000", audioFile]);
 
@@ -138,6 +158,7 @@ export async function processJob(data, onProgress) {
     for (let i = 0; i < windows.length; i++) {
       const { start, end } = windows[i];
       const outFile = path.join(workDir, `clip_${i + 1}.mp4`);
+      // 9:16 vertical: scale to fill 1080x1920, center crop.
       const vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920";
       await run("ffmpeg", [
         "-y",
@@ -157,6 +178,8 @@ export async function processJob(data, onProgress) {
 
       const bytes = await readFile(outFile);
       const fileStat = await stat(outFile);
+      // Return as data URL. For production, upload to S3/R2/Cloudinary and
+      // return the public URL instead — this keeps callback payloads small.
       const base64 = bytes.toString("base64");
       const video_url = `data:video/mp4;base64,${base64}`;
 
